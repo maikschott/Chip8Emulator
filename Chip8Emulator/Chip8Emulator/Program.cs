@@ -6,7 +6,7 @@ namespace Chip8Emulator
 {
   internal static class Program
   {
-    private static async Task Main(string[] args)
+    private static void Main(string[] args)
     {
       if (args.Length == 0)
       {
@@ -17,11 +17,9 @@ namespace Chip8Emulator
       machine.LoadProgram(args[0]);
 
       var cts = new CancellationTokenSource();
-      var form = new Screen(machine);
       var programTask = Task.Run(() => machine.ExecuteProgram(cts.Token), cts.Token);
+      var form = new Screen(machine, programTask, cts);
       Application.Run(form);
-      cts.Cancel();
-      await programTask;
     }
   }
 }

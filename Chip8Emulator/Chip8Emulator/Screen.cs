@@ -4,6 +4,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Chip8Emulator
@@ -31,18 +33,22 @@ namespace Chip8Emulator
     };
 
     private readonly Machine machine;
+    private readonly Task programTask;
+    private readonly CancellationTokenSource cts;
     private Bitmap bitmap;
     private PictureBox image;
 
-    public Screen(Machine machine)
+    public Screen(Machine machine, Task programTask, CancellationTokenSource cts)
     {
       this.machine = machine;
+      this.programTask = programTask;
+      this.cts = cts;
       InitializeComponent();
     }
 
     private void InitializeComponent()
     {
-      bitmap = new Bitmap(Display.ColumnCount, Display.RowCount, PixelFormat.Format8bppIndexed);
+      bitmap = new Bitmap(GraphicsUnit.ColumnCount, GraphicsUnit.RowCount, PixelFormat.Format8bppIndexed);
       image = new PictureBoxWithInterpolationMode
       {
         SizeMode = PictureBoxSizeMode.StretchImage,
@@ -53,49 +59,70 @@ namespace Chip8Emulator
       ClientSize = new Size(bitmap.Width * 10, bitmap.Height * 10);
       BackColor = Color.Black;
       Controls.Add(image);
-      KeyDown += (sender, eventArgs) =>
-      {
-        if (eventArgs.KeyCode == Keys.Escape)
-        {
-          Application.Exit();
-        }
 
-        if (eventArgs.KeyCode == Keys.F5)
-        {
-          machine.Reset();
-        }
+      bool isDisplayUpdating = false;
 
-        if (keyMappings.TryGetValue(eventArgs.KeyCode, out byte key))
-        {
-          machine.Keys[key] = true;
-        }
-      };
-      KeyUp += (sender, eventArgs) =>
+      machine.GraphicsUnit.DoDraw = displayData =>
       {
-        if (keyMappings.TryGetValue(eventArgs.KeyCode, out byte key))
-        {
-          machine.Keys[key] = false;
-        }
-      };
+        if (isDisplayUpdating) { return; }
+        isDisplayUpdating = true;
 
-      machine.Display.DoDraw = bitarray =>
-      {
         var bmpData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadWrite, bitmap.PixelFormat);
         try
         {
-          Marshal.Copy(bitarray, 0, bmpData.Scan0, bitarray.Length);
+          Marshal.Copy(displayData, 0, bmpData.Scan0, displayData.Length);
         }
         finally
         {
           bitmap.UnlockBits(bmpData);
         }
 
+        if (image.IsDisposed) { return; }
         image.Invoke((Action)delegate
         {
           image.Invalidate();
           image.Update();
         });
+
+        isDisplayUpdating = false;
       };
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+      base.OnKeyDown(e);
+
+      if (e.KeyCode == Keys.Escape)
+      {
+        Application.Exit();
+      }
+
+      if (e.KeyCode == Keys.F5)
+      {
+        machine.Reset();
+      }
+
+      if (keyMappings.TryGetValue(e.KeyCode, out byte key))
+      {
+        machine.Keys[key] = true;
+      }
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+      base.OnKeyUp(e);
+
+      if (keyMappings.TryGetValue(e.KeyCode, out byte key))
+      {
+        machine.Keys[key] = false;
+      }
+    }
+
+    protected override async void OnFormClosing(FormClosingEventArgs e)
+    {
+      cts.Cancel();
+      await programTask;
+      base.OnFormClosing(e);
     }
   }
 

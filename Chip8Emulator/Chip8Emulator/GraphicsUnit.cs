@@ -2,19 +2,13 @@
 
 namespace Chip8Emulator
 {
-  public class Display
+  public class GraphicsUnit
   {
     public const int ColumnCount = 64;
     public const int RowCount = 32;
 
     private readonly byte[] display = new byte[RowCount * ColumnCount];
     private bool needRedraw = true;
-
-    public Display()
-    {
-      Console.SetWindowSize(ColumnCount * 2, RowCount + 3);
-      Console.CursorVisible = false;
-    }
 
     public Action<byte[]> DoDraw { get; set; }
 
