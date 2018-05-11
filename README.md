@@ -1,6 +1,6 @@
 # Chip-8 and Super Chip emulator
 
-Working prototype (though running a little bit choppy) to implement an emulator based on the simple CHIP-8 engine.
+Working prototype (though running a little bit choppy) implementing an emulator for the Chip-8 and Super Chip systems.
 
 Used documentation:
 - Laurence Muller: [How to write an emulator (CHIP-8 interpreter)](http://www.multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/)
