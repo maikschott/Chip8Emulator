@@ -48,18 +48,15 @@ namespace Chip8Emulator
 
     private void InitializeComponent()
     {
-      Console.SetCursorPosition(0, 0);
-      Console.WriteLine("Keypad: 1-4, Q-R, A-F, Y-V, Restart: F5");
+      Text = "Keypad: 1-4, Q-R, A-F, Y-V, Restart: F5";
 
-      bitmap = new Bitmap(GraphicsUnit.ColumnCount, GraphicsUnit.RowCount, PixelFormat.Format8bppIndexed);
       image = new PictureBoxWithInterpolationMode
       {
         SizeMode = PictureBoxSizeMode.StretchImage,
         InterpolationMode = InterpolationMode.NearestNeighbor,
-        Dock = DockStyle.Fill,
-        Image = bitmap
+        Dock = DockStyle.Fill
       };
-      ClientSize = new Size(bitmap.Width * 10, bitmap.Height * 10);
+      CreateBitmap();
       BackColor = Color.Black;
       Controls.Add(image);
 
@@ -89,20 +86,31 @@ namespace Chip8Emulator
 
         isDisplayUpdating = false;
       };
+      machine.GraphicsUnit.ChangeResolution = _ =>
+      {
+        image.Invoke((Action)CreateBitmap);
+      };
+    }
+
+    private void CreateBitmap()
+    {
+      bitmap = new Bitmap(machine.GraphicsUnit.ColumnCount, machine.GraphicsUnit.RowCount, PixelFormat.Format8bppIndexed);
+      image.Image = bitmap;
+      ClientSize = new Size(bitmap.Width * 10, bitmap.Height * 10);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
       base.OnKeyDown(e);
 
-      if (e.KeyCode == Keys.Escape)
+      switch (e.KeyCode)
       {
-        Application.Exit();
-      }
-
-      if (e.KeyCode == Keys.F5)
-      {
-        machine.Reset();
+        case Keys.Escape:
+          Application.Exit();
+          break;
+        case Keys.F5:
+          machine.Reset();
+          break;
       }
 
       if (keyMappings.TryGetValue(e.KeyCode, out byte key))

@@ -10,76 +10,43 @@ namespace Chip8Emulator
 {
   public class Machine
   {
+    public const int EmulationSpeed = 1000; // Hertz
     public const int IoFrequency = 60; // Hertz
+    public static readonly TimeSpan CpuCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / EmulationSpeed);
     public static readonly TimeSpan IoCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / IoFrequency);
-    public static readonly TimeSpan EmulationSpeed = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 1000);
     public const int MemorySize = 4096;
     private const byte False = 0;
     private const byte True = 1;
 
-    private readonly byte[] fontSet =
-    {
-      0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-      0x20, 0x60, 0x20, 0x20, 0x70, // 1
-      0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-      0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-      0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-      0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-      0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-      0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-      0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-      0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-      0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-      0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-      0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-      0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-      0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-      0xF0, 0x80, 0xF0, 0x80, 0x80 // F
-    };
-
     private readonly Dictionary<byte, OpcodeContext> opcodeGroups;
     private readonly Stopwatch timer = new Stopwatch();
+    private readonly Random rnd;
 
     public Machine()
     {
       Memory = new byte[MemorySize];
-      Array.Copy(fontSet, Memory, fontSet.Length);
       Cpu = new CpuState();
       GraphicsUnit = new GraphicsUnit();
       Keys = new bool[16];
-      var rnd = new Random();
+      rnd = new Random();
+
+      Array.Copy(GraphicsUnit.FontSet, Memory, GraphicsUnit.FontSet.Length);
 
       opcodeGroups = new Dictionary<byte, OpcodeContext>
       {
         [0x0] = OpcodeSystem,
-        [0x1] = (x, y, nn, nnn, v) => Cpu.Jump(nnn),
-        [0x2] = (x, y, nn, nnn, v) =>
-        {
-          Cpu.Callstack.Push(Cpu.Pc);
-          Cpu.Jump(nnn);
-        },
-        [0x3] = (x, y, nn, nnn, v) =>
-        {
-          if (v[x] == nn) { Cpu.Next(); }
-        },
-        [0x4] = (x, y, nn, nnn, v) =>
-        {
-          if (v[x] != nn) { Cpu.Next(); }
-        },
-        [0x5] = (x, y, nn, nnn, v) =>
-        {
-          if (v[x] == v[y]) { Cpu.Next(); }
-        },
-        [0x6] = (x, y, nn, nnn, v) => { v[x] = nn; },
-        [0x7] = (x, y, nn, nnn, v) => { v[x] += nn; },
+        [0x1] = OpcodeJump,
+        [0x2] = OpcodeCall,
+        [0x3] = OpcodeSkipIfEqual,
+        [0x4] = OpcodeSkipIfNotEqual,
+        [0x5] = OpcodeSkipIfVEqual,
+        [0x6] = OpcodeLoad,
+        [0x7] = OpcodeAdd,
         [0x8] = OpcodeArithmetic,
-        [0x9] = (x, y, nn, nnn, v) =>
-        {
-          if (v[x] != v[y]) { Cpu.Next(); }
-        },
-        [0xA] = (x, y, nn, nnn, v) => { Cpu.AddressRegister = nnn; },
-        [0xB] = (x, y, nn, nnn, v) => { Cpu.Jump((ushort)(v[0] + nnn)); },
-        [0xC] = (x, y, nn, nnn, v) => { v[x] = (byte)(rnd.Next(256) & nn); },
+        [0x9] = OpcodeSkipIfVNotEqual,
+        [0xA] = OpcodeLoadAddr,
+        [0xB] = OpcodeJumpRelative,
+        [0xC] = OpcodeRandom,
         [0xD] = OpcodeDisplay,
         [0xE] = OpcodeKeys,
         [0xF] = OpcodeMisc
@@ -97,6 +64,10 @@ namespace Chip8Emulator
     public byte SoundTimer { get; set; }
 
     public bool[] Keys { get; set; }
+
+    public bool Running { get; set; }
+
+    public bool DebugMode { get; set; } = true;
 
     public void Reset()
     {
@@ -118,9 +89,10 @@ namespace Chip8Emulator
 
     public void ExecuteProgram(CancellationToken cancellationToken)
     {
+      Running = true;
       timer.Restart();
 
-      while (!cancellationToken.IsCancellationRequested)
+      while (!cancellationToken.IsCancellationRequested && Running)
       {
         var elapsedTime = timer.Elapsed;
 
@@ -134,8 +106,10 @@ namespace Chip8Emulator
           timer.Restart();
         }
 
-        Thread.Sleep(EmulationSpeed);
+        Thread.Sleep(CpuCycleDuration);
       }
+
+      Console.WriteLine("--END--");
     }
 
     public void ProcessCpuCycle()
@@ -169,9 +143,7 @@ namespace Chip8Emulator
 
     private void PrintState()
     {
-      Console.SetCursorPosition(0, 1);
-      Console.WriteLine($"PC={Cpu.Pc:X4}, I={Cpu.AddressRegister:X4}");
-      Console.WriteLine(string.Join(", ", Cpu.Registers.Select((x, i) => $"V{i:X}={x:X2}")));
+      Console.Title = string.Join(", ", Cpu.Registers.Select((x, i) => $"V{i:X}={x:X2}")) + $", I={Cpu.AddressRegister:X4}";
     }
 
     private void EmulateCycle()
@@ -191,34 +163,116 @@ namespace Chip8Emulator
 
     private void OpcodeSystem(byte x, byte y, byte nn, ushort nnn, byte[] v)
     {
-      if (nn == 0xE0)
+      if ((nn & 0xF0) == 0xC0)
       {
-        GraphicsUnit.ClearScreen();
+        var pixels = nn & 0xF;
+        Debug($"SCD {pixels}");
+        GraphicsUnit.ScrollDown(pixels);
+        return;
       }
-      else if (nn == 0xEE)
+
+      switch (nn)
       {
-        Cpu.Jump(Cpu.Callstack.Pop());
+        case 0xE0:
+          Debug("CLS");
+          GraphicsUnit.ClearScreen();
+          break;
+        case 0xEE:
+          Debug("RET");
+          Cpu.Jump(Cpu.Callstack.Pop());
+          break;
+        case 0xFB:
+          Debug("SCR");
+          GraphicsUnit.ScrollRight(4);
+          break;
+        case 0xFC:
+          Debug("SCL");
+          GraphicsUnit.ScrollLeft(4);
+          break;
+        case 0xFD:
+          Debug("EXIT");
+          Running = false;
+          break;
+        case 0xFE:
+          Debug("LOW");
+          GraphicsUnit.HighRes = false;
+          break;
+        case 0xFF:
+          Debug("HIGH");
+          GraphicsUnit.HighRes = true;
+          break;
+        default:
+          Debug($"Unknown opcode 0{nnn:X3}");
+          break;
       }
     }
 
-    private static void OpcodeArithmetic(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    private void OpcodeJump(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"JMP {nnn:X3}");
+      Cpu.Jump(nnn);
+    }
+
+    private void OpcodeCall(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"CALL {nnn:X3}");
+      Cpu.Callstack.Push(Cpu.Pc);
+      Cpu.Jump(nnn);
+    }
+
+    private void OpcodeSkipIfEqual(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"SE V{x:X}, {nn:X2}");
+      if (v[x] == nn) { Cpu.Next(); }
+    }
+
+    private void OpcodeSkipIfNotEqual(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"SNE V{x:X}, {nn:X2}");
+      if (v[x] != nn) { Cpu.Next(); }
+    }
+
+    private void OpcodeSkipIfVEqual(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"SE V{x:X}, V{y:X}");
+      if (v[x] == v[y]) { Cpu.Next(); }
+    }
+
+    private void OpcodeLoad(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"LD V{x:X}, {nn:X2}");
+      v[x] = nn;
+    }
+
+    private void OpcodeAdd(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"ADD V{x:X}, {nn:X2}");
+      v[x] += nn;
+    }
+
+    private void OpcodeArithmetic(byte x, byte y, byte nn, ushort nnn, byte[] v)
     {
       switch (nn & 0xF)
       {
         case 0x0:
+          Debug($"LD V{x:X}, V{y:X}");
           v[x] = v[y];
           break;
         case 0x1:
+          Debug($"OR V{x:X}, V{y:X}");
           v[x] |= v[y];
           break;
         case 0x2:
+          Debug($"AND V{x:X}, V{y:X}");
           v[x] &= v[y];
           break;
         case 0x3:
+          Debug($"XOR V{x:X}, V{y:X}");
           v[x] ^= v[y];
           break;
         case 0x4:
         {
+          Debug($"ADD V{x:X}, V{y:X}");
           var result = v[x] + v[y];
           v[x] = (byte)result;
           v[0xf] = result > 255 ? True : False;
@@ -226,45 +280,86 @@ namespace Chip8Emulator
         }
         case 0x5:
         {
+          Debug($"SUB V{x:X}, V{y:X}");
           var result = v[x] - v[y];
           v[x] = (byte)result;
           v[0xf] = result >= 0 ? True : False;
           break;
         }
         case 0x6:
+          Debug($"SHR V{x:X}, 1");
           v[0xf] = (byte)(v[y] & 0x1);
           v[x] /*= v[y]*/ >>= 1;
           break;
         case 0x7:
         {
+          Debug($"SUBN V{x:X}, V{y:X}");
           var result = v[y] - v[x];
           v[x] = (byte)result;
           v[0xf] = result >= 0 ? True : False;
           break;
         }
         case 0xE:
+          Debug($"SHL V{x:X}, 1");
           v[0xf] = (byte)(v[y] >> 7);
           v[x] /*= v[y]*/ <<= 1;
           break;
         default:
-          throw new NotSupportedException($"Unknown opcode 8{nnn:X3}");
+          Debug($"Unknown opcode 8{nnn:X3}");
+          break;
       }
+    }
+
+    private void OpcodeSkipIfVNotEqual(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"SNE V{x:X}, V{y:X}");
+      if (v[x] != v[y]) { Cpu.Next(); }
+    }
+
+    private void OpcodeLoadAddr(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"LD I, {nnn:X3}");
+      Cpu.AddressRegister = nnn;
+    }
+
+    private void OpcodeJumpRelative(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"JMP V0, {nnn:X3}");
+      Cpu.Jump((ushort)(v[0] + nnn));
+    }
+
+    private void OpcodeRandom(byte x, byte y, byte nn, ushort nnn, byte[] v)
+    {
+      Debug($"RND V{x:X}, {nn:X2}");
+      v[x] = (byte)(rnd.Next(256) & nn);
     }
 
     private void OpcodeDisplay(byte x, byte y, byte nn, ushort nnn, byte[] v)
     {
       var height = nn & 0xF;
-      // ReSharper disable once InconsistentNaming
-      const int width = 8;
+      Debug($"DRW V{x:X}, V{y:X}, {height}");
+
+      int width = 8;
+      int msb = 0x80;
+      if (height == 0 && GraphicsUnit.HighRes)
+      {
+        height = 16;
+        width = 16;
+        msb = 0x8000;
+      }
+
       x = v[x];
       y = v[y];
       v[0xF] = 0;
       for (var dy = 0; dy < height; dy++)
       {
-        var row = Memory[Cpu.AddressRegister + dy];
+        int row = width == 8 ?
+          Memory[Cpu.AddressRegister + dy] :
+          Memory[Cpu.AddressRegister + dy * 2] << 8 | Memory[Cpu.AddressRegister + dy * 2 + 1];
         for (var dx = 0; dx < width; dx++)
         {
-          if ((row & (0x80 >> dx)) != 0)
+          var mask = msb >> dx;
+          if ((row & mask) != 0)
           {
             if (!GraphicsUnit.TogglePixel(x + dx, y + dy))
             {
@@ -279,15 +374,17 @@ namespace Chip8Emulator
     {
       if (nn == 0x9E)
       {
+        Debug($"SKP V{x:X}");
         if (Keys[v[x]]) { Cpu.Next(); }
       }
       else if (nn == 0xA1)
       {
+        Debug($"SKNP V{x:X}");
         if (!Keys[v[x]]) { Cpu.Next(); }
       }
       else
       {
-        throw new NotSupportedException($"Unknown opcode E{nnn:X3}");
+        Debug($"Unknown opcode E{nnn:X3}");
       }
     }
 
@@ -296,10 +393,12 @@ namespace Chip8Emulator
       switch (nn)
       {
         case 0x07:
+          Debug($"LD V{x:X}, DT");
           v[x] = DelayTimer;
           break;
         case 0x0A:
         {
+          Debug($"LD V{x:X}, K");
           var keyPressed = false;
           for (byte key = 0; key < Keys.Length; key++)
           {
@@ -317,40 +416,68 @@ namespace Chip8Emulator
           break;
         }
         case 0x15:
+          Debug($"LD DT, V{x:X}");
           DelayTimer = v[x];
           break;
         case 0x18:
+          Debug($"LD ST, V{x:X}");
           SoundTimer = v[x];
           break;
         case 0x1E:
+          Debug($"ADD I, V{x:X}");
           var newValue = Cpu.AddressRegister + v[x];
           Cpu.AddressRegister = (ushort)newValue;
           v[0xF] = newValue > 0xFFF ? True : False;
           break;
         case 0x29:
+          Debug($"LD F, V{x:X}");
           Cpu.AddressRegister = (ushort)(v[x] * 5);
+          break;
+        case 0x30:
+          Debug($"LD HF, V{x:X}");
+          Cpu.AddressRegister = (ushort)(v[x] * 10);
           break;
         case 0x33:
         {
+          Debug($"LD B, V{x:X}");
           Memory[Cpu.AddressRegister + 0] = (byte)(v[x] / 100);
           Memory[Cpu.AddressRegister + 1] = (byte)(v[x] / 10 % 10);
           Memory[Cpu.AddressRegister + 2] = (byte)(v[x] % 10);
           break;
         }
         case 0x55:
+          Debug($"LD [I], V{x:X}");
           for (var i = 0; i <= x; i++)
           {
             Memory[Cpu.AddressRegister++] = v[i];
           }
           break;
         case 0x65:
+          Debug($"LD V{x:X}, [I]");
           for (var i = 0; i <= x; i++)
           {
             v[i] = Memory[Cpu.AddressRegister++];
           }
           break;
+        case 0x75:
+          Debug($"LD R, V{x:X}");
+          Cpu.UserFlags = v[x];
+          break;
+        case 0x85:
+          Debug($"LD V{x:X}, R");
+          v[x] = Cpu.UserFlags;
+          break;
         default:
-          throw new NotSupportedException($"Unknown opcode F{nnn:X3}");
+          Debug($"Unknown opcode F{nnn:X3}");
+          break;
+      }
+    }
+
+    private void Debug(string command)
+    {
+      if (DebugMode)
+      {
+        Console.WriteLine($"{Cpu.Pc - 2:X4}: {command}");
       }
     }
 

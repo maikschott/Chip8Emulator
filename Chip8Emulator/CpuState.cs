@@ -12,7 +12,9 @@ namespace Chip8Emulator
 
     public ushort Pc { get; private set; } = DefaultAddress;
 
-    public Stack<ushort> Callstack { get; } = new Stack<ushort>(24);
+    public Stack<ushort> Callstack { get; } = new Stack<ushort>(16);
+
+    public byte UserFlags { get; set; }
 
     public void Next()
     {
