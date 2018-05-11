@@ -48,6 +48,9 @@ namespace Chip8Emulator
 
     private void InitializeComponent()
     {
+      Console.SetCursorPosition(0, 0);
+      Console.WriteLine("Keypad: 1-4, Q-R, A-F, Y-V, Restart: F5");
+
       bitmap = new Bitmap(GraphicsUnit.ColumnCount, GraphicsUnit.RowCount, PixelFormat.Format8bppIndexed);
       image = new PictureBoxWithInterpolationMode
       {

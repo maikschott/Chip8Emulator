@@ -10,8 +10,9 @@ namespace Chip8Emulator
 {
   public class Machine
   {
-    public const int CpuFrequency = 60; // Hertz
-    public const int CycleDuration = 1000 / CpuFrequency;
+    public const int IoFrequency = 60; // Hertz
+    public static readonly TimeSpan IoCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / IoFrequency);
+    public static readonly TimeSpan EmulationSpeed = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 1000);
     public const int MemorySize = 4096;
     private const byte False = 0;
     private const byte True = 1;
@@ -121,26 +122,36 @@ namespace Chip8Emulator
 
       while (!cancellationToken.IsCancellationRequested)
       {
-        ProcessLoop();
-        Thread.Sleep(0);
+        var elapsedTime = timer.Elapsed;
+
+        ProcessCpuCycle();
+
+        while (elapsedTime >= IoCycleDuration)
+        {
+          ProcessIoCycle();
+
+          elapsedTime -= IoCycleDuration;
+          timer.Restart();
+        }
+
+        Thread.Sleep(EmulationSpeed);
       }
     }
 
-    public void ProcessLoop()
+    public void ProcessCpuCycle()
     {
       PrintState();
       EmulateCycle();
+    }
 
-      if (timer.ElapsedMilliseconds > CycleDuration)
+    public void ProcessIoCycle()
+    {
+      if (DelayTimer > 0) { DelayTimer--; }
+      if (SoundTimer > 0)
       {
-        timer.Restart();
-        if (DelayTimer > 0) { DelayTimer--; }
-        if (SoundTimer > 0)
+        if (--SoundTimer == 0)
         {
-          if (--SoundTimer == 0)
-          {
-            Console.Beep(800, 50);
-          }
+          Console.Beep(800, 50);
         }
       }
 
@@ -158,7 +169,7 @@ namespace Chip8Emulator
 
     private void PrintState()
     {
-      Console.SetCursorPosition(0, 0);
+      Console.SetCursorPosition(0, 1);
       Console.WriteLine($"PC={Cpu.Pc:X4}, I={Cpu.AddressRegister:X4}");
       Console.WriteLine(string.Join(", ", Cpu.Registers.Select((x, i) => $"V{i:X}={x:X2}")));
     }
