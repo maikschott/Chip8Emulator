@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace Chip8Emulator
@@ -12,15 +13,15 @@ namespace Chip8Emulator
   {
     public const int EmulationSpeed = 1000; // Hertz
     public const int IoFrequency = 60; // Hertz
-    public static readonly TimeSpan CpuCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / EmulationSpeed);
-    public static readonly TimeSpan IoCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / IoFrequency);
     public const int MemorySize = 4096;
     private const byte False = 0;
     private const byte True = 1;
+    public static readonly TimeSpan CpuCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / EmulationSpeed);
+    public static readonly TimeSpan IoCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / IoFrequency);
 
     private readonly Dictionary<byte, OpcodeContext> opcodeGroups;
-    private readonly Stopwatch timer = new Stopwatch();
     private readonly Random rnd;
+    private readonly Stopwatch timer = new Stopwatch();
 
     public Machine()
     {
@@ -66,8 +67,6 @@ namespace Chip8Emulator
     public bool[] Keys { get; set; }
 
     public bool Running { get; set; }
-
-    public bool DebugMode { get; set; } = true;
 
     public void Reset()
     {
@@ -141,9 +140,21 @@ namespace Chip8Emulator
       return (GetAsyncKeyState((short)key) & KeyDown) == KeyDown;
     }
 
+    [Conditional("DEBUG")]
     private void PrintState()
     {
-      Console.Title = string.Join(", ", Cpu.Registers.Select((x, i) => $"V{i:X}={x:X2}")) + $", I={Cpu.AddressRegister:X4}";
+      var sb = new StringBuilder(118);
+      sb.Append("I=");
+      sb.Append(Cpu.AddressRegister.ToString("X4"));
+      for (int i = 0; i < Cpu.Registers.Length; i++)
+      {
+        sb.Append(", V");
+        sb.Append(i.ToString("X1"));
+        sb.Append('=');
+        sb.Append(Cpu.Registers[i].ToString("X2"));
+      }
+
+      Console.Title = sb.ToString();
     }
 
     private void EmulateCycle()
@@ -339,8 +350,8 @@ namespace Chip8Emulator
       var height = nn & 0xF;
       Debug($"DRW V{x:X}, V{y:X}, {height}");
 
-      int width = 8;
-      int msb = 0x80;
+      var width = 8;
+      var msb = 0x80;
       if (height == 0 && GraphicsUnit.HighRes)
       {
         height = 16;
@@ -353,9 +364,7 @@ namespace Chip8Emulator
       v[0xF] = 0;
       for (var dy = 0; dy < height; dy++)
       {
-        int row = width == 8 ?
-          Memory[Cpu.AddressRegister + dy] :
-          Memory[Cpu.AddressRegister + dy * 2] << 8 | Memory[Cpu.AddressRegister + dy * 2 + 1];
+        var row = width == 8 ? Memory[Cpu.AddressRegister + dy] : (Memory[Cpu.AddressRegister + dy * 2] << 8) | Memory[Cpu.AddressRegister + dy * 2 + 1];
         for (var dx = 0; dx < width; dx++)
         {
           var mask = msb >> dx;
@@ -473,12 +482,10 @@ namespace Chip8Emulator
       }
     }
 
+    [Conditional("DEBUG")]
     private void Debug(string command)
     {
-      if (DebugMode)
-      {
-        Console.WriteLine($"{Cpu.Pc - 2:X4}: {command}");
-      }
+      Console.WriteLine($"{Cpu.Pc - 2:X4}: {command}");
     }
 
     private delegate void OpcodeContext(byte x, byte y, byte nn, ushort nnn, byte[] v);
