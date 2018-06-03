@@ -48,7 +48,7 @@ namespace Chip8Emulator
 
     private void InitializeComponent()
     {
-      Text = "Keypad: 1-4, Q-R, A-F, Y-V, Restart: F5";
+      Text = "Keypad: 1-4, Q-R, A-F, Y-V, Restart: F5, Emulation speed: +/-";
 
       image = new PictureBoxWithInterpolationMode
       {
@@ -109,7 +109,14 @@ namespace Chip8Emulator
           Application.Exit();
           break;
         case Keys.F5:
+          machine.EmulationSpeed = Machine.DefaultEmulationSpeed;
           machine.Reset();
+          break;
+        case Keys.Add:
+          machine.EmulationSpeed = (int)(machine.EmulationSpeed * 1.1);
+          break;
+        case Keys.Subtract:
+          machine.EmulationSpeed = (int)(machine.EmulationSpeed / 1.1);
           break;
       }
 

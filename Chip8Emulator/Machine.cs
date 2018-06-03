@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -11,17 +10,18 @@ namespace Chip8Emulator
 {
   public class Machine
   {
-    public const int EmulationSpeed = 1000; // Hertz
-    public const int IoFrequency = 60; // Hertz
+    public const int DefaultEmulationSpeed = 1000; // Hertz
+    public const int DefaultIoFrequency = 60; // Hertz
     public const int MemorySize = 4096;
     private const byte False = 0;
     private const byte True = 1;
-    public static readonly TimeSpan CpuCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / EmulationSpeed);
-    public static readonly TimeSpan IoCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / IoFrequency);
 
     private readonly Dictionary<byte, OpcodeContext> opcodeGroups;
     private readonly Random rnd;
     private readonly Stopwatch timer = new Stopwatch();
+    private int emulationSpeed;
+    public TimeSpan cpuCycleDuration;
+    public TimeSpan ioCycleDuration;
 
     public Machine()
     {
@@ -30,6 +30,7 @@ namespace Chip8Emulator
       GraphicsUnit = new GraphicsUnit();
       Keys = new bool[16];
       rnd = new Random();
+      EmulationSpeed = DefaultEmulationSpeed;
 
       Array.Copy(GraphicsUnit.FontSet, Memory, GraphicsUnit.FontSet.Length);
 
@@ -52,6 +53,17 @@ namespace Chip8Emulator
         [0xE] = OpcodeKeys,
         [0xF] = OpcodeMisc
       };
+    }
+
+    public int EmulationSpeed
+    {
+      get => emulationSpeed;
+      set
+      {
+        emulationSpeed = value;
+        cpuCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / emulationSpeed);
+        ioCycleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / (DefaultIoFrequency * emulationSpeed / DefaultEmulationSpeed));
+      }
     }
 
     public byte[] Memory { get; }
@@ -83,7 +95,21 @@ namespace Chip8Emulator
 
     public void LoadProgram(byte[] program)
     {
-      Array.Copy(program, 0, Memory, Cpu.Pc, program.Length);
+      var startOfs = 0;
+      if (program.Length > 13 &&
+        program[0] == 'H' &&
+        program[1] == 'P' &&
+        program[2] == 'H' &&
+        program[3] == 'P' &&
+        program[4] == '4' &&
+        program[5] == '8' &&
+        program[6] == '-' &&
+        program[7] == 'A')
+      {
+        startOfs = 13;
+      }
+
+      Array.Copy(program, startOfs, Memory, Cpu.Pc, program.Length - startOfs);
     }
 
     public void ExecuteProgram(CancellationToken cancellationToken)
@@ -97,15 +123,15 @@ namespace Chip8Emulator
 
         ProcessCpuCycle();
 
-        while (elapsedTime >= IoCycleDuration)
+        while (elapsedTime >= ioCycleDuration)
         {
           ProcessIoCycle();
 
-          elapsedTime -= IoCycleDuration;
+          elapsedTime -= ioCycleDuration;
           timer.Restart();
         }
 
-        Thread.Sleep(CpuCycleDuration);
+        Thread.Sleep(cpuCycleDuration);
       }
 
       Console.WriteLine("--END--");
@@ -146,7 +172,7 @@ namespace Chip8Emulator
       var sb = new StringBuilder(118);
       sb.Append("I=");
       sb.Append(Cpu.AddressRegister.ToString("X4"));
-      for (int i = 0; i < Cpu.Registers.Length; i++)
+      for (var i = 0; i < Cpu.Registers.Length; i++)
       {
         sb.Append(", V");
         sb.Append(i.ToString("X1"));
@@ -200,6 +226,8 @@ namespace Chip8Emulator
           Debug("SCL");
           GraphicsUnit.ScrollLeft(4);
           break;
+        case 0x10:
+        case 0x11:
         case 0xFD:
           Debug("EXIT");
           Running = false;
@@ -213,7 +241,7 @@ namespace Chip8Emulator
           GraphicsUnit.HighRes = true;
           break;
         default:
-          Debug($"Unknown opcode 0{nnn:X3}");
+          Debug($"Unknown opcode 0{nnn:X3}", true);
           break;
       }
     }
@@ -316,7 +344,7 @@ namespace Chip8Emulator
           v[x] /*= v[y]*/ <<= 1;
           break;
         default:
-          Debug($"Unknown opcode 8{nnn:X3}");
+          Debug($"Unknown opcode 8{nnn:X3}", true);
           break;
       }
     }
@@ -393,7 +421,7 @@ namespace Chip8Emulator
       }
       else
       {
-        Debug($"Unknown opcode E{nnn:X3}");
+        Debug($"Unknown opcode E{nnn:X3}", true);
       }
     }
 
@@ -477,15 +505,16 @@ namespace Chip8Emulator
           v[x] = Cpu.UserFlags;
           break;
         default:
-          Debug($"Unknown opcode F{nnn:X3}");
+          Debug($"Unknown opcode F{nnn:X3}", true);
           break;
       }
     }
 
     [Conditional("DEBUG")]
-    private void Debug(string command)
+    private void Debug(string command, bool isError = false)
     {
-      Console.WriteLine($"{Cpu.Pc - 2:X4}: {command}");
+      var writer = isError ? Console.Error : Console.Out;
+      writer.WriteLine($"{Cpu.Pc - 2:X4}: {command}");
     }
 
     private delegate void OpcodeContext(byte x, byte y, byte nn, ushort nnn, byte[] v);

@@ -1,4 +1,6 @@
-﻿using System.Threading;
+﻿using System;
+using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -10,6 +12,8 @@ namespace Chip8Emulator
     {
       if (args.Length == 0)
       {
+        Console.WriteLine($@"Usage:
+{Path.GetFileNameWithoutExtension(Application.ExecutablePath)} <game file>");
         return;
       }
 
